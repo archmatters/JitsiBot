@@ -15,6 +15,10 @@ import mastodon
 logger = logging.getLogger(__name__)
 
 class TootScanner:
+    """ We will not "sound the horn" more than once within the "horn window."
+        This is in seconds.
+    """
+    horn_window = 1800
     trunk = None
     jitsi_link = None
     storage_file = None
@@ -100,7 +104,10 @@ class TootScanner:
                 content = status.get("content")
                 if nfrom and status_id and self.horn_pattern.search(content):
                     logger.info(f"doTheWork(): status={status_id} got a request to sound the horn!")
-                    self.tootThatHorn(nfrom)
+                    self.tootThatHorn(nfrom, status_id)
+                    # TODO shouldn't we just drop out of the loop here?
+                    # or should we process all at once, and drop all those from the followers?
+                    # or... ?
             self.last_note_id = id
 
         # update last ID storage if there was some update
@@ -108,9 +115,9 @@ class TootScanner:
             self._writeStore()
     
 
-    def tootThatHorn( self, source_name: str ):
+    def tootThatHorn( self, source_name: str, source_status_id: str ):
         timeSince = time.time() - self.last_horn_time
-        if timeSince < 1800:
+        if timeSince < self.horn_window:
             logger.warn(f"tootThatHorn(): I refuse to toot again after only {timeSince} seconds")
             return
 
@@ -140,4 +147,6 @@ class TootScanner:
             self.last_horn_time = time.time()
         
         self._writeStore()
+
+        self.trunk.postStatus(f"@{source_name} Job's done! Toot toot!\n{self.jitsi_link}", source_status_id)
 
