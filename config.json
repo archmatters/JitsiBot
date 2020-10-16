@@ -1,0 +1,7 @@
+{
+    "mastodon_instance": "https://joinmastodon.org",
+    "mastodon_token": "optional-access-token-here",
+    "storage_dir": "/path/to/persistent/storage",
+    "jitsi_link": "https://meet.jit.si/your-room-here",
+    "log_level": "INFO"
+}
