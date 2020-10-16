@@ -1,0 +1,2 @@
+# JitsiBot
+Mastodon Jitsi bot
