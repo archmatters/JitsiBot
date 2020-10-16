@@ -112,10 +112,10 @@ class Proboscis:
         else:
             action = f" from {action.strip()}"
 
-        if not response:
+        if response is None:
             raise Exception(f"{caller}(): no response provided{action}")
         elif response.status_code < 200 or response.status_code > 299:
-            raise Exception(f"{caller}(): HTTP status{action} = {response.status_code}")
+            raise requests.ConnectionError(f"{caller}(): HTTP status{action} = {response.status_code}")
 
         try:
             reset = ""
