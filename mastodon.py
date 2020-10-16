@@ -33,17 +33,28 @@ class Proboscis:
     only_alphanum_pattern = re.compile('[\\d\\w]')
     iso8601_pattern = re.compile('(\\d{4})-(\\d\\d)-(\\d\\d)T(\\d\\d):(\\d\\d):(\\d\\d)(\\.\\d+|)(.*)')
 
-    def __init__( self, mastodon_instance: str, mastodon_token="", application_name="Proboscis" ):
+    def __init__( self, mastodon_instance: str, mastodon_token="", application_name="Proboscis",
+            reset_period=300 ):
+        """ The one and only Proboscis constructor.
+
+            mastodon_instance: the base URI for the Mastodon instance you want to work with.
+            mastodon_token: the user token for the account this Proboscis should use.
+            application_name: unused for now.
+            reset_period: the last observed API rate limit reset period for the instance;
+                    use getObservedAPIResetPeriod() to retrieve, if you wish to persist this.
+        """
         if not mastodon_instance:
             raise Exception("Proboscis requires a mastodon_instance")
         self.mastodon_instance = mastodon_instance
         self.mastodon_token = mastodon_token
         self.application_name = application_name
+        if (reset_period > 0):
+            self.api_last_periods = [ reset_period, reset_period, reset_period ]
 
 
     def getRateRemaining( self ):
         """ Mastodon API is rate-limited; you are allowed only a certain number of requests within a given window.
-        This method returns the remaining count allowed for the current window.
+        This method returns the last known remaining count allowed for the current window.
         """
         return self.api_rate_remain
 
@@ -51,13 +62,27 @@ class Proboscis:
     def getEstimatedTimeToReset( self ):
         """ Based on observation, seconds remaining until the next API rate limit reset.
         """
+        return int(time.time() - self.api_last_reset.timestamp() + self.getObservedAPIResetPeriod())
+
+
+    def getObservedAPIResetPeriod( self ):
+        """ The mean observed period in the API rate limit reset window.
+            
+            Why do we do this?  At least some instances lie about the rate limit window.
+            The X-RateLimit-Reset header will indicate a time, and once that time arrives,
+            the rate will not always reset. For example, X-RateLimit-Reset indicates that
+            the limit should reset every five minutes, but in practice it actually resets
+            every fifteen.
+
+            If we have not observed any rate limit resets, we assume the default, 300 seconds.
+        """
         est_period = 300
         if len(self.api_last_periods) > 2:
             est_period = 0
             for x in range(len(self.api_last_periods)):
                 est_period += self.api_last_periods[x]
             est_period /= len(self.api_last_periods)
-        return int(time.time() - self.api_last_reset.timestamp() + est_period)
+        return est_period
 
 
     def getEstimatedRateReset( self ):
@@ -89,6 +114,8 @@ class Proboscis:
 
         if not response:
             raise Exception(f"{caller}(): no response provided{action}")
+        elif response.status_code < 200 or response.status_code > 299:
+            raise Exception(f"{caller}(): HTTP status{action} = {response.status_code}")
 
         try:
             reset = ""
@@ -126,10 +153,6 @@ class Proboscis:
                 est = self.getEstimatedTimeToReset()
                 dttm = datetime.datetime.fromtimestamp(time.time() + est)
                 logger.debug(f"{caller}():{action} rate limit is {limit}; remaining {remain}; reset at {reset} (est actual {est}sec={dttm})")
-            if response.status_code < 200 or response.status_code > 299:
-                logger.error(f"{caller}(): HTTP status{action} = {response.status_code}")
-                logger.error(response.text)
-                return False
             return True
         except Exception as e:
             logger.error(f"{caller}(): error in response{action}:")
