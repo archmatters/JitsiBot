@@ -30,7 +30,7 @@ class TootScanner:
     last_horn_time = 0
     api_reset_period = 0
 
-    horn_pattern = re.compile('\\b(?:toot|sound|blow)(?:\\s+on)\\s+(?:teh|the|that|your?)\\s+horn\\b', re.IGNORECASE)
+    horn_pattern = re.compile('\\b(?:toot|sound|blow)(?:\\s+on|)\\s+(?:teh|the|that|your?)\\s+horn\\b', re.IGNORECASE)
 
     def __init__( self, cfg: config.Config ):
         self.jitsi_link = cfg.get("jitsi_link")
@@ -116,6 +116,8 @@ class TootScanner:
             logger.info(f"doTheWork(): notification id={id} type={ntype}")
             if id and account and ntype == "follow":
                 logger.info(f"New follower @{account.get('acct')}")
+                # TODO if we've tooted the horn in the last hour (or whatever the window is),
+                # we should include the link in the message.
                 self.trunk.postStatus(f"Hello @{account.get('acct')}, I'll let you know when someone tells me to toot the horn!")
                 # update the store after every new follow in case of fatal error
                 self.last_note_id = id
@@ -155,37 +157,64 @@ class TootScanner:
         try:
             followers.remove(source_name)
         except Exception as e:
-            logger.error(f"tootThatHorn(): error removing '{source_name}' from followers")
-            logger.error(e)
+            logger.info(f"tootThatHorn(): did not remove '{source_name}' from followers: {e}")
 
         # TODO we can check remaining API calls in remaining window, divide by followers per toot,
         # and loop period, figuring out if we should rate-limit ourselves
-        calls_remain = trunk.getRateRemaining()
-        time_remain = trunk.getObservedAPIResetPeriod()
+        calls_remain = self.trunk.getRateRemaining()
+        time_remain = self.trunk.getEstimatedTimeToReset()
+        # account for notification polling
+        calls_remain -= int(time_remain / self.note_poll_period)
+        logger.info(f"tootThatHorn(): {calls_remain} calls left after polling in {time_remain} secs")
+        if calls_remain < 5:
+            per_toot = 10
+            wait_between = self.note_poll_period * 2
+        else:
+            per_toot = 2
+            toots_needed = calls_remain + 1
+            while toots_needed > calls_remain and per_toot < 10:
+                per_toot += 1
+                toots_needed = len(followers) / per_toot
+
+        wait_between = 0
+        if toots_needed > calls_remain:
+            wait_between = time_remain / toots_needed + 1
+
+        if wait_between > 0:
+            logger.info(f"tootThatHorn(): tooting to {len(followers)} followers {per_toot} at a time waiting {wait_between} secs")
+        else:
+            logger.info(f"tootThatHorn(): tooting to {len(followers)} followers {per_toot} at a time")
 
         pos = 0
-        logger.info(f"tootThatHorn(): tooting to {len(followers)} followers")
         while pos < len(followers):
             # three at a time?
             toot = ""
-            for xa in range(pos, min(len(followers), pos + 3)):
+            for xa in range(pos, min(len(followers), pos + per_toot)):
                 if len(toot) > 0:
                     toot += ' '
                 toot += '@'
                 toot += followers[xa]
-            pos += 3
             toot += "\nHear ye, hear ye, Jitsi is in session: "
             toot += self.jitsi_link
-            self.trunk.postStatus(toot)
-            self.last_horn_time = time.time()
-        
-        self._writeStore()
+            while not self.trunk.postStatus(toot):
+                reset = self.trunk.getEstimatedTimeToReset()
+                # estimated reset may be early; if so we'll get another failure and
+                # we need to ensure we wait long enough for the actual reset
+                if reset < self.note_poll_period:
+                    reset = self.note_poll_period
+                logger.warn(f"tootThatHorn(): failed to toot while sounding the horn; waiting {reset} sec for next reset.")
+                time.sleep(reset)
+            # now that we've successfully tooted again
+            pos += per_toot
+            time.sleep(wait_between)
 
+        self.last_horn_time = time.time()
+        self._writeStore()
         self.trunk.postStatus(f"@{source_name} Job's done! Toot toot!\n{self.jitsi_link}", source_status_id)
 
 
 def timeToText( seconds: int ):
-    """ Returns an abbreviated textual string representation of a time period:
+    """ Returns an abbreviated text representation of a time period:
         '59 sec' '59 min' '1 hr' '1 hr 12 min'
     """
     if seconds >= 3600:
@@ -199,4 +228,5 @@ def timeToText( seconds: int ):
         return f"{int(seconds / 60)} min"
     else:
         return f"{int(seconds)} sec"
+
 
