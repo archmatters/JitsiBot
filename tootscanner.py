@@ -57,7 +57,7 @@ class TootScanner:
                 self.last_horn_time = store.get("last_horn_time", 0)
                 self.api_reset_period = store.get("api_reset_period", 300)
             except Exception as e:
-                logger.error(f"init(): failed to read from {self.storage_file}")
+                logger.error(f"_readStore(): failed to read state from {self.storage_file}")
                 logger.error(e)
             finally:
                 if stream:
@@ -75,7 +75,7 @@ class TootScanner:
             stream = Path(self.storage_file).open("w")
             stream.write(json.dumps(store))
         except Exception as e:
-            logger.error(f"doTheWork(): failed to write notification ID to {self.storage_file}")
+            logger.error(f"_writeStore(): failed to persist state to {self.storage_file}")
             logger.error(e)
         finally:
             if stream:
@@ -97,12 +97,12 @@ class TootScanner:
                 connectErrors += 1
                 logger.error(e)
                 if connectErrors > 15:
-                    logger.fatal(f"__main__: after {timeToText(totalTime)} ({connectErrors - 1} failures to connect), I give up.")
+                    logger.fatal(f"doTheWork(): after {timeToText(totalTime)} ({connectErrors - 1} failures to connect), I give up.")
                     exit(1)
                 if connectErrors == 1:
-                    logger.error(f"__main__: sleeping for {connectErrors} minute after a connection error (will be {totalTime+connectErrors} minute total)")
+                    logger.error(f"doTheWork(): sleeping for {connectErrors} minute after a connection error (will be {totalTime+connectErrors} minute total)")
                 else:
-                    logger.error(f"__main__: sleeping for {connectErrors} minutes after another connection error (will be {totalTime+connectErrors} mins total)")
+                    logger.error(f"doTheWork(): sleeping for {connectErrors} minutes after another connection error (will be {totalTime+connectErrors} mins total)")
                 time.sleep(60 * connectErrors)
     
 
@@ -112,6 +112,7 @@ class TootScanner:
         # switch to different follow messages based on whether we may be tooting or not
         new_followers = []
         all_requestors = {}
+        final_id = None
         for note in reversed(notes):
             ntype = note.get('type') # mention, follow, favourite, reblog, poll, follow_request
             id = note.get('id') # str
@@ -132,6 +133,9 @@ class TootScanner:
                     all_requestors[nfrom] = status_id
         
         if len(new_followers) == 0 and len(all_requestors) == 0:
+            if self.last_note_id != final_id:
+                self.last_note_id = final_id
+                self._writeStore()
             return
 
         recent_horn = False
