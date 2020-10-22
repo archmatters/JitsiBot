@@ -106,65 +106,77 @@ class TootScanner:
     def processNotes( self ):
         notes = self.trunk.getNotifications(self.last_note_id)
 
-        # for each notification (in reverse order), verify we see all expected elements, then reply
-        # scan for new followers first,
+        # switch to different follow messages based on whether we may be tooting or not
+        new_followers = []
+        all_requestors = {}
         for note in reversed(notes):
-            ntype = note.get("type") # mention, follow, favourite, reblog, poll, follow_request
-            id = note.get("id") # str
-            account = note.get("account") # obj
-            status = note.get("status") # obj
-            logger.info(f"doTheWork(): notification id={id} type={ntype}")
-            if id and account and ntype == "follow":
+            ntype = note.get('type') # mention, follow, favourite, reblog, poll, follow_request
+            id = note.get('id') # str
+            account = note.get('account') # obj
+            status = note.get('status') # obj
+            logger.info(f"processNotes(): notification id={id} type={ntype}")
+            final_id = id
+            if ntype == 'follow' and id and account:
                 logger.info(f"New follower @{account.get('acct')}")
-                # TODO if we've tooted the horn in the last hour (or whatever the window is),
-                # we should include the link in the message.
-                self.trunk.postStatus(f"Hello @{account.get('acct')}, I'll let you know when someone tells me to toot the horn!")
-                # update the store after every new follow in case of fatal error
-                self.last_note_id = id
-                self._writeStore()
-            self.last_note_id = id
-        # then look for toots
-        for note in reversed(notes):
-            ntype = note.get("type") # mention, follow, favourite, reblog, poll, follow_request
-            id = note.get("id") # str
-            account = note.get("account") # obj
-            status = note.get("status") # obj
-            if id and account and status and ntype == 'mention':
+                new_followers.append(account.get('acct'))
+            elif ntype == 'mention' and id and account and status:
                 # account.username is local name, account.acct is fqun
-                nfrom = account.get("acct")
-                status_id = status.get("id")
-                content = status.get("content")
-                if nfrom and status_id and self.horn_pattern.search(content):
-                    logger.info(f"doTheWork(): status={status_id} got a request to sound the horn!")
-                    self.tootThatHorn(nfrom, status_id)
-                    # TODO shouldn't we just drop out of the loop here?
-                    # or should we process all at once, and drop all those from the followers?
-                    # or... ?
-            self.last_note_id = id
+                nfrom = account.get('acct')
+                status_id = status.get('id')
+                content = status.get('content')
+                if nfrom and status_id and content and self.horn_pattern.search(content):
+                    logger.info(f"processNotes(): status={status_id} got a request to sound the horn from {nfrom}!")
+                    all_requestors[nfrom] = status_id
+        
+        if len(new_followers) == 0 and len(all_requestors) == 0:
+            return
+
+        recent_horn = False
+        time_since_horn = time.time() - self.last_horn_time
+        if time_since_horn < self.horn_window:
+            recent_horn = True
+            if len(all_requestors) > 0:
+                logger.warn(f"processNotes(): I refuse to toot again after only {timeToText(time_since_horn)} ({time_since_horn} sec)")
+
+        if recent_horn or len(all_requestors) > 0:
+            follow_message = f"Jitsi may be going right now:\\n{self.jitsi_link}\\nAnd I'll let you the next time when someone tells me to toot the horn!"
+        else:
+            follow_message = f"I'll let you know when someone tells me to toot the horn!"
+
+        for follower in new_followers:
+            self.trunk.postStatus(f"Hello @{follower}, " + follow_message)
+
+        if len(all_requestors) > 0 and not recent_horn:
+            self.tootThatHorn(all_requestors, new_followers)
+        # TODO else reply saying we're in the no-notify window
 
         # update last ID storage if there was some update
-        if len(notes) > 0 and self.last_note_id:
+        if len(notes) > 0 and final_id:
+            self.last_note_id = final_id
             self._writeStore()
     
 
-    def tootThatHorn( self, source_name: str, source_status_id: str ):
-        timeSince = time.time() - self.last_horn_time
-        if timeSince < self.horn_window:
-            logger.warn(f"tootThatHorn(): I refuse to toot again after only {timeSince} seconds")
-            return
-
+    def tootThatHorn( self, requestors: dict, skip_followers: list ):
         followers = self.trunk.getAllFollowers(self.trunk.getAccountId())
-        try:
-            followers.remove(source_name)
-        except Exception as e:
-            logger.info(f"tootThatHorn(): did not remove '{source_name}' from followers: {e}")
+        for name in requestors:
+            try:
+                followers.remove(name)
+            except Exception as e:
+                logger.info(f"tootThatHorn(): did not remove requestor '{name}' from followers: {e}")
+        for name in skip_followers:
+            try:
+                followers.remove(name)
+            except Exception as e:
+                logger.info(f"tootThatHorn(): did not remove follower '{name}' from followers: {e}")
 
-        # TODO we can check remaining API calls in remaining window, divide by followers per toot,
+        logger.info(f"tootThatHorn(): tooting to {len(followers)} followers")
+
+        # check remaining API calls in remaining window, divide by followers per toot,
         # and loop period, figuring out if we should rate-limit ourselves
         calls_remain = self.trunk.getRateRemaining()
         time_remain = self.trunk.getEstimatedTimeToReset()
         # account for notification polling
-        calls_remain -= int(time_remain / self.note_poll_period)
+        calls_remain -= int(time_remain / self.note_poll_period) + len(requestors)
         logger.info(f"tootThatHorn(): {calls_remain} calls left after polling in {time_remain} secs")
         if calls_remain < 5:
             per_toot = 10
@@ -194,7 +206,7 @@ class TootScanner:
                     toot += ' '
                 toot += '@'
                 toot += followers[xa]
-            toot += "\nHear ye, hear ye, Jitsi is in session: "
+            toot += "\\nHear ye, hear ye, Jitsi is in session: "
             toot += self.jitsi_link
             while not self.trunk.postStatus(toot):
                 reset = self.trunk.getEstimatedTimeToReset()
@@ -210,7 +222,9 @@ class TootScanner:
 
         self.last_horn_time = time.time()
         self._writeStore()
-        self.trunk.postStatus(f"@{source_name} Job's done! Toot toot!\n{self.jitsi_link}", source_status_id)
+        # TODO we could batch these also
+        for name in requestors:
+            self.trunk.postStatus(f"@{name} Job's done! Toot toot!\n{self.jitsi_link}", requestors[name])
 
 
 def timeToText( seconds: int ):
