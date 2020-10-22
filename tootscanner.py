@@ -15,11 +15,14 @@ import mastodon
 logger = logging.getLogger(__name__)
 
 class TootScanner:
-    """ We will not "sound the horn" more than once within the "horn window."
-        This is in seconds.
+    """ Application logic.  Polls for Mastodon notifications, and will respond
+        to new follows and mentions with the code phrase or a recognized variation.
     """
+
+    # We will not "sound the horn" more than once within the "horn window."
+    # This is in seconds.
     horn_window = 1800
-    """ The notification polling period. """
+    # The notification polling period.
     note_poll_period = 15
 
     trunk = None
