@@ -133,7 +133,7 @@ class TootScanner:
                     all_requestors[nfrom] = status_id
         
         if len(new_followers) == 0 and len(all_requestors) == 0:
-            if self.last_note_id != final_id:
+            if final_id and self.last_note_id != final_id:
                 self.last_note_id = final_id
                 self._writeStore()
             return

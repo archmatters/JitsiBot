@@ -189,7 +189,6 @@ class Proboscis:
         headers = {}
         headers["Authorization"] = f"Bearer {self.mastodon_token}"
 
-        # if there is no known previous notification ID, just get the most recent
         params = {}
         if limit:
             params["limit"] = limit
