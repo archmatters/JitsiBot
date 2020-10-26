@@ -146,7 +146,7 @@ class TootScanner:
                 logger.warn(f"processNotes(): I refuse to toot again after only {timeToText(time_since_horn)} ({time_since_horn} sec)")
 
         if recent_horn or len(all_requestors) > 0:
-            follow_message = f"Jitsi may be going right now:\\n{self.jitsi_link}\\nAnd I'll let you the next time when someone tells me to toot the horn!"
+            follow_message = f"Jitsi may be going right now: {self.jitsi_link}\nAnd I'll let you the next time when someone tells me to toot the horn!"
         else:
             follow_message = f"I'll let you know when someone tells me to toot the horn!"
 
@@ -213,7 +213,7 @@ class TootScanner:
                     toot += ' '
                 toot += '@'
                 toot += followers[xa]
-            toot += "\\nHear ye, hear ye, Jitsi is in session: "
+            toot += "\nHear ye, hear ye, Jitsi is in session: "
             toot += self.jitsi_link
             while not self.trunk.postStatus(toot):
                 reset = self.trunk.getEstimatedTimeToReset()
