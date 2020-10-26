@@ -124,13 +124,24 @@ class TootScanner:
                 logger.info(f"New follower @{account.get('acct')}")
                 new_followers.append(account.get('acct'))
             elif ntype == 'mention' and id and account and status:
-                # account.username is local name, account.acct is fqun
+                # account.username is local name, account.acct might be fqun
                 nfrom = account.get('acct')
                 status_id = status.get('id')
                 content = status.get('content')
                 if nfrom and status_id and content and self.horn_pattern.search(content):
-                    logger.info(f"processNotes(): status={status_id} got a request to sound the horn from {nfrom}!")
-                    all_requestors[nfrom] = status_id
+                    # ignore if older than six hours
+                    age = 0
+                    created = status.get('created_at')
+                    if created:
+                        dtm = mastodon.parseISODate(created)
+                        if dtm:
+                            age = time.time() - dtm.timestamp()
+                    if age > 6 * 3600:
+                        logger.warn('processNotes(): ignoring horn request status='
+                                + f"{status_id} due to age ({timeToText(time.time() - dtm.timestamp())})")
+                    else:
+                        logger.info(f"processNotes(): status={status_id} got a request to sound the horn from {nfrom}!")
+                        all_requestors[nfrom] = status_id
         
         if len(new_followers) == 0 and len(all_requestors) == 0:
             if final_id and self.last_note_id != final_id:
@@ -236,12 +247,23 @@ class TootScanner:
 
 def timeToText( seconds: int ):
     """ Returns an abbreviated text representation of a time period:
-        '59 sec' '59 min' '1 hr' '1 hr 12 min'
+        '59 sec' '59 min' '1 hr' '1 hr 12 min' '1 day' '2 days 8 hr'
     """
-    if seconds >= 3600:
+    if seconds >= 86400:
+        hrs = (seconds % 86400) / 3600
+        days = int(seconds / 86400)
+        if days == 1:
+            word = "day"
+        else:
+            word = "days"
+        if seconds < 6 * 86400 and hrs > 1: # only report hours up to six days
+            return f"{days} {word} {int(hrs)} hr"
+        else:
+            return f"{days} {word}"
+    elif seconds >= 3600:
         mins = (seconds % 3600) / 60
         #if abs(mins - 30) < 20: # for rounding
-        if seconds < 14400 and mins > 10: # only report minutes up to four hours
+        if seconds < 6 * 3600 and mins > 10: # only report minutes up to six hours
             return f"{int(seconds / 3600)} hr {int(mins)} min"
         else:
             return f"{int(seconds / 3600)} hr"

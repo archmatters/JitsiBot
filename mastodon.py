@@ -14,6 +14,24 @@ import requests
 import config
 
 logger = logging.getLogger(__name__)
+iso8601_pattern = re.compile('(\\d{4})-(\\d\\d)-(\\d\\d)T(\\d\\d):(\\d\\d):(\\d\\d)(\\.\\d+|)(.*)')
+
+def parseISODate( dttm_string ):
+    """ Get a datetime.datetime instance from an ISO 8601 date and time string.
+        Returns None if the parse fails.
+        Not 100% compliant with the spec.
+    """
+    try:
+        dtm = iso8601_pattern.match(dttm_string)
+        if dtm and "Z" == dtm.group(8):
+            return datetime.datetime.fromisoformat(dttm_string.replace("Z", "+00:00"))
+        elif dtm:
+            return datetime.datetime.fromisoformat(dttm_string)
+    except Exception as e:
+        logger.error(f"parseISODate(): error reading time '{dttm_string}':")
+        logger.error(e)
+        return None
+
 
 class Proboscis:
     """ An instance-specific, account-specific Mastodon interface, gradually being
@@ -31,7 +49,6 @@ class Proboscis:
 
     link_rel_pattern = re.compile('<(.*?)>;\\s*rel="([^"]*)"')
     only_alphanum_pattern = re.compile('[\\d\\w]')
-    iso8601_pattern = re.compile('(\\d{4})-(\\d\\d)-(\\d\\d)T(\\d\\d):(\\d\\d):(\\d\\d)(\\.\\d+|)(.*)')
 
     def __init__( self, mastodon_instance: str, mastodon_token="", application_name="Proboscis",
             reset_period=300 ):
@@ -91,15 +108,15 @@ class Proboscis:
         return datetime.datetime.fromtimestamp(time.time() + self.getEstimatedTimeToReset())
 
 
-    # check response status and rate limits
-    # Returns True when the status is 200, otherwise False
     def checkResponse( self, response, caller=None, action=None ):
         """ Check the HTTP response from a Mastodon API call.  This function checks for
             failure, and updates API rate limit and reset information.  The content of
             the response is not inspected in any way.
 
-            When the response is None, an exception is raised.  When the HTTP code is
-            not 20x, the return value is False.  Otherwise the return value is True.
+            When the HTTP code is 200-299, the return value is True.
+            Otherwise an exception is raised.  If the response is a normal HTTP response
+            with an abnormal status code, the exception is requests.ConnectionError.
+            If a problem is found in the response, it may be a generic Exception. 
         """
         now = time.time()
         if not caller:
@@ -134,18 +151,10 @@ class Proboscis:
                     self.api_last_reset = datetime.datetime.now()
                 self.api_rate_remain = remain
             if reset_utc:
-                try:
-                    dtm = self.iso8601_pattern.match(reset_utc)
-                    if dtm and "Z" == dtm.group(8):
-                        self.api_next_reset = datetime.datetime.fromisoformat(reset_utc.replace("Z", "+00:00"))
-                    elif dtm:
-                        self.api_next_reset = datetime.datetime.fromisoformat(reset_utc)
-                    if self.api_next_reset:
-                        reset = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(self.api_next_reset.timestamp()))
-                except Exception as e:
-                    logger.error(f"checkResponse(): error reading time '{reset_utc}':")
-                    logger.error(e)
-                    self.api_next_reset = None
+                self.api_next_reset = parseISODate(reset_utc)
+                if self.api_next_reset:
+                    reset = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(self.api_next_reset.timestamp()))
+                else:
                     reset = reset_utc
             if int(remain) < 150:
                 logger.warn(f"{caller}():{action} rate limit is {limit}; remaining {remain}; reset at {reset}")
