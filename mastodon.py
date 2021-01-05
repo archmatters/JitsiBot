@@ -66,6 +66,10 @@ class Proboscis:
         self.mastodon_token = mastodon_token
         self.application_name = application_name
         if (reset_period > 0):
+            # some assumptions on how API resets work
+            reset_period = int((reset_period + 30) / 60) * 60
+            now = time.time()
+            self.api_last_reset = datetime.datetime.fromtimestamp(now - (now % reset_period))
             self.api_last_periods = [ reset_period, reset_period, reset_period ]
 
 
@@ -79,7 +83,7 @@ class Proboscis:
     def getEstimatedTimeToReset( self ):
         """ Based on observation, seconds remaining until the next API rate limit reset.
         """
-        return int(time.time() - self.api_last_reset.timestamp() + self.getObservedAPIResetPeriod())
+        return int(self.api_last_reset.timestamp() + self.getObservedAPIResetPeriod() - time.time())
 
 
     def getObservedAPIResetPeriod( self ):
