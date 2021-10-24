@@ -46,6 +46,7 @@ class Proboscis:
     api_last_reset = datetime.datetime.now()
     api_next_reset = datetime.datetime.fromtimestamp(time.time() + 300)
     api_last_periods = []
+    last_report: int = 0
 
     link_rel_pattern = re.compile('<(.*?)>;\\s*rel="([^"]*)"')
     only_alphanum_pattern = re.compile('[\\d\\w]')
@@ -166,6 +167,11 @@ class Proboscis:
                 est = self.getEstimatedTimeToReset()
                 dttm = datetime.datetime.fromtimestamp(time.time() + est)
                 logger.debug(f"{caller}():{action} rate limit is {limit}; remaining {remain}; reset at {reset} (est actual {est}sec={dttm})")
+            if not self.last_report or self.last_report + 3600 < time.time():
+                self.last_report = time.time()
+                est = self.getEstimatedTimeToReset()
+                dttm = datetime.datetime.fromtimestamp(time.time() + est)
+                logger.info(f"{caller}():{action} rate limit is {limit}; remaining {remain}; reset at {reset} (est actual {est}sec={dttm})")
             return True
         except Exception as e:
             logger.error(f"{caller}(): error in response{action}:")
