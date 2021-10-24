@@ -31,7 +31,7 @@ class TootScanner:
     account_id = None
     last_note_id = ""
     last_horn_time = 0
-    api_reset_period = 0
+    api_reset_period = 900
 
     horn_pattern = re.compile('\\b(?:toot|sound|blow)(?:\\s+on|)\\s+(?:teh|the|that|your?)\\s+horn\\b', re.IGNORECASE)
 
@@ -55,7 +55,7 @@ class TootScanner:
                 store = json.load(stream)
                 self.last_note_id = store.get("last_note_id")
                 self.last_horn_time = store.get("last_horn_time", 0)
-                self.api_reset_period = store.get("api_reset_period", 300)
+                self.api_reset_period = store.get("api_reset_period", 900)
             except Exception as e:
                 logger.error(f"_readStore(): failed to read state from {self.storage_file}")
                 logger.error(e)
@@ -86,6 +86,13 @@ class TootScanner:
         # change errorLimit to change the maximum tolerable sequential errors
         errorLimit = 15
         connectErrors = 0
+        if not self.last_note_id:
+            # instead of using whatever the mastodon instance default is, let's
+            # get the last one and start from that limit.
+            notes = self.trunk.getNotifications(limit=1)
+            if (len(notes) > 0):
+                self.last_note_id = notes[0].get('id')
+                self._writeStore()
         while True:
             # you gotta do the work
             try:
