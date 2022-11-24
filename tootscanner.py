@@ -84,8 +84,8 @@ class TootScanner:
 
     def doTheWork( self ):
         # change errorLimit to change the maximum tolerable sequential errors
-        errorLimit = 15
         connectErrors = 0
+        totalTime = 0
         if not self.last_note_id:
             # instead of using whatever the mastodon instance default is, let's
             # get the last one and start from that limit.
@@ -97,20 +97,18 @@ class TootScanner:
             # you gotta do the work
             try:
                 self.processNotes()
-                connectErrors = 0
+                if connectErrors != 0:
+                    logger.info(f"doTheWork(): connect successful after {timeToText(totalTime)} waiting and {connectErrors} errors")
+                    connectErrors = 0
+                    totalTime = 0
                 time.sleep(self.note_poll_period)
             except requests.ConnectionError as e:
-                totalTime = int((connectErrors * connectErrors + connectErrors) / 2) # calculate before incrementing count
                 connectErrors += 1
+                delay = min(32 * 60, self.note_poll_period * 2 ** connectErrors)
+                totalTime += delay
                 logger.error(e)
-                if connectErrors > 15:
-                    logger.fatal(f"doTheWork(): after {timeToText(totalTime)} ({connectErrors - 1} failures to connect), I give up.")
-                    exit(1)
-                if connectErrors == 1:
-                    logger.error(f"doTheWork(): sleeping for {connectErrors} minute after a connection error (will be {totalTime+connectErrors} minute total)")
-                else:
-                    logger.error(f"doTheWork(): sleeping for {connectErrors} minutes after another connection error (will be {totalTime+connectErrors} mins total)")
-                time.sleep(60 * connectErrors)
+                logger.error(f"doTheWork(): connection error #{connectErrors}, waiting {timeToText(delay)} (will be {timeToText(totalTime)} total)")
+                time.sleep(delay)
     
 
     def processNotes( self ):
@@ -149,6 +147,8 @@ class TootScanner:
                     else:
                         logger.info(f"processNotes(): status={status_id} got a request to sound the horn from {nfrom}!")
                         all_requestors[nfrom] = status_id
+                else:
+                    logger.info("No horn request found in '%s' from %s", content, nfrom)
         
         if len(new_followers) == 0 and len(all_requestors) == 0:
             if final_id and self.last_note_id != final_id:
